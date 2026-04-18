@@ -45,6 +45,14 @@ class ED047TC1Display : public display::DisplayBuffer {
 
   display::DisplayType get_display_type() override { return display::DisplayType::DISPLAY_TYPE_GRAYSCALE; }
 
+  // ── Méthode de mise à jour partielle ──────────────────────────────────────
+  // Redessine uniquement la zone spécifiée (x, y, w, h) avec le mode choisi.
+  // Modes recommandés :
+  //   MODE_GL16  → qualité grayscale, sans flash  (tick minute)
+  //   MODE_GC16  → qualité max avec flash         (refresh complet horaire)
+  //   MODE_DU    → rapide, monochrome uniquement  (non recommandé ici)
+  void partial_update(int x, int y, int w, int h, enum EpdDrawMode mode = MODE_GL16);
+
   GPIOPin *pwr_pin_{nullptr};
   GPIOPin *bst_en_pin_{nullptr};
   GPIOPin *xstl_pin_{nullptr};
@@ -62,6 +70,9 @@ class ED047TC1Display : public display::DisplayBuffer {
 
   EpdiyHighlevelState hl_state_;
   uint32_t esphome_buffer_size_{0};
+
+  // Copie le buffer ESPHome vers le framebuffer epdiy (zone complète ou partielle)
+  void copy_buffer_to_epd_(int x, int y, int w, int h);
 };
 
 }  // namespace ed047tc1

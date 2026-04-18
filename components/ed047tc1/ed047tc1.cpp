@@ -1,11 +1,10 @@
 #include "ed047tc1.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include "esphome/core/gpio.h" // For InternalGPIOPin
-#include <driver/gpio.h>       // For ESP-IDF's gpio_num_t
+#include "esphome/core/gpio.h"
+#include <driver/gpio.h>
 #include "esp_heap_caps.h"
-
-#include "output_lcd/lcd_driver.h" // For LcdEpdConfig_t
+#include "output_lcd/lcd_driver.h"
 
 namespace esphome {
 namespace ed047tc1 {
@@ -14,15 +13,9 @@ static const char *const TAG = "ed047tc1";
 ED047TC1Display* ED047TC1Display::instance = nullptr;
 
 static inline gpio_num_t esphome_pin_to_gpio_num(GPIOPin *pin_obj) {
-    if (!pin_obj) {
-        ESP_LOGE(TAG, "esphome_pin_to_gpio_num: pin_obj is null!");
-        return (gpio_num_t)-1;
-    }
+    if (!pin_obj) { ESP_LOGE(TAG, "esphome_pin_to_gpio_num: pin_obj is null!"); return (gpio_num_t)-1; }
     InternalGPIOPin *internal_pin = static_cast<InternalGPIOPin*>(pin_obj);
-    if (!internal_pin) {
-        ESP_LOGE(TAG, "esphome_pin_to_gpio_num: Failed to cast to InternalGPIOPin.");
-        return (gpio_num_t)-1;
-    }
+    if (!internal_pin) { ESP_LOGE(TAG, "esphome_pin_to_gpio_num: Failed to cast to InternalGPIOPin."); return (gpio_num_t)-1; }
     return (gpio_num_t)internal_pin->get_pin();
 }
 
@@ -30,34 +23,25 @@ static void custom_board_init_callback(uint32_t epd_row_width_param) {
     if (!ED047TC1Display::instance) { ESP_LOGE(TAG, "board_init_cb: Instance is null!"); return; }
     ED047TC1Display* self = ED047TC1Display::instance;
     ESP_LOGI(TAG, "Custom board_init_callback called.");
-
     if (self->pwr_pin_) self->pwr_pin_->digital_write(false);
     if (self->bst_en_pin_) self->bst_en_pin_->digital_write(false);
-
     const EpdDisplay_t* display_model = epd_get_display();
     if (!display_model) { ESP_LOGE(TAG, "board_init_cb: epd_get_display() null."); return; }
-
     lcd_bus_config_t bus_cfg;
     memset(&bus_cfg, 0xFF, sizeof(lcd_bus_config_t));
     for (int i = 0; i < 8; ++i) { bus_cfg.data[i] = esphome_pin_to_gpio_num(self->d_pins_[i]); }
-
     bus_cfg.clock       = esphome_pin_to_gpio_num(self->pclk_pin_ ? self->pclk_pin_ : self->xstl_pin_);
     bus_cfg.start_pulse = esphome_pin_to_gpio_num(self->xstl_pin_);
     bus_cfg.leh         = esphome_pin_to_gpio_num(self->xle_pin_);
     bus_cfg.stv         = esphome_pin_to_gpio_num(self->spv_pin_);
     bus_cfg.ckv         = esphome_pin_to_gpio_num(self->ckv_pin_);
-
     LcdEpdConfig_t lcd_epd_cfg;
     lcd_epd_cfg.pixel_clock = (size_t)(display_model->bus_speed > 0 ? display_model->bus_speed * 1000000 : 16000000);
-    if (self->pclk_pin_ == nullptr && self->xstl_pin_ == nullptr) { ESP_LOGE(TAG, "Critical: No valid Pixel Clock source!"); }
-    else if (self->pclk_pin_ == nullptr) { ESP_LOGW(TAG, "Warning: Using XSTL_PIN as PCLK source."); }
-
     lcd_epd_cfg.ckv_high_time    = 70;
     lcd_epd_cfg.line_front_porch = 4;
     lcd_epd_cfg.le_high_time     = 4;
     lcd_epd_cfg.bus_width        = 8;
     lcd_epd_cfg.bus              = bus_cfg;
-
     epd_lcd_init(&lcd_epd_cfg, display_model->width, display_model->height);
     ESP_LOGI(TAG, "epd_lcd_init called. PCLK: %u Hz.", (unsigned int)lcd_epd_cfg.pixel_clock);
 }
@@ -131,17 +115,16 @@ void ED047TC1Display::setup() {
     };
     setup_pin(this->pwr_pin_, "PWR pin");
     setup_pin(this->bst_en_pin_, "BST_EN pin");
-    setup_pin(this->xstl_pin_, "XSTL_PIN (EPD CLK/STRD for LCD STH/DE)");
+    setup_pin(this->xstl_pin_, "XSTL_PIN");
     if (this->pclk_pin_) this->pclk_pin_->setup();
-    setup_pin(this->xle_pin_, "XLE_PIN (EPD LE for LCD LEH)");
-    setup_pin(this->spv_pin_, "SPV_PIN (EPD SPV for LCD STV)");
-    setup_pin(this->ckv_pin_, "CKV_PIN (EPD CKV for LCD CKV)");
+    setup_pin(this->xle_pin_, "XLE_PIN");
+    setup_pin(this->spv_pin_, "SPV_PIN");
+    setup_pin(this->ckv_pin_, "CKV_PIN");
     for (int i = 0; i < 8; ++i) { char pin_name[10]; sprintf(pin_name, "D%d pin", i); setup_pin(this->d_pins_[i], pin_name); }
     if (this->is_failed()) return;
 
     epd_init(&esphome_ed047tc1_board_definition, &ED047TC2, EPD_LUT_64K);
     ESP_LOGI(TAG, "epd_init() called.");
-
     this->hl_state_ = epd_hl_init(EPD_BUILTIN_WAVEFORM);
     if (epd_hl_get_framebuffer(&this->hl_state_) == nullptr) { ESP_LOGE(TAG, "Failed to init epdiy high-level state!"); this->mark_failed(); return; }
     ESP_LOGI(TAG, "epd_hl_init() successful. EPDiy FB: %p", (void*)epd_hl_get_framebuffer(&this->hl_state_));
@@ -160,55 +143,67 @@ void ED047TC1Display::setup() {
     ESP_LOGCONFIG(TAG, "ED047TC1 setup finished.");
 }
 
-void ED047TC1Display::update() {
-    this->do_update_();
-    if (!this->buffer_) { ESP_LOGE(TAG, "ESPHome buffer null in update!"); return; }
+// ── Copie une zone du buffer ESPHome vers le framebuffer epdiy ───────────────
+void ED047TC1Display::copy_buffer_to_epd_(int x, int y, int w, int h) {
+    if (!this->buffer_) return;
     uint8_t* epd_fb = epd_hl_get_framebuffer(&this->hl_state_);
-    if (!epd_fb) { ESP_LOGE(TAG, "EPDiy FB null in update!"); return; }
-
-    ESP_LOGD(TAG, "Copying ESPHome buffer to EPDiy buffer and updating display...");
-    int w = this->get_width_internal();
-    int h = this->get_height_internal();
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            uint8_t esphome_pixel_8bpp = this->buffer_[(y * w) + x];
-            uint8_t epdiy_draw_value = (esphome_pixel_8bpp >> 4) << 4;
-            epd_draw_pixel(x, y, epdiy_draw_value, epd_fb);
+    if (!epd_fb) return;
+    int screen_w = this->get_width_internal();
+    int screen_h = this->get_height_internal();
+    int x_end = std::min(x + w, screen_w);
+    int y_end = std::min(y + h, screen_h);
+    for (int py = y; py < y_end; py++) {
+        for (int px = x; px < x_end; px++) {
+            uint8_t esphome_pixel = this->buffer_[(py * screen_w) + px];
+            uint8_t epdiy_value   = (esphome_pixel >> 4) << 4;
+            epd_draw_pixel(px, py, epdiy_value, epd_fb);
         }
     }
-    ESP_LOGD(TAG, "Buffer copy complete. Triggering EPD screen update.");
+}
+
+// ── Full update (toutes les heures, depuis component.update) ─────────────────
+void ED047TC1Display::update() {
+    this->do_update_();
+    copy_buffer_to_epd_(0, 0, get_width_internal(), get_height_internal());
+    ESP_LOGD(TAG, "Full update — MODE_GC16 plein écran");
     epd_poweron();
-    EpdRect update_rect = epd_full_screen();
-    enum EpdDrawError draw_result = epd_hl_update_area(&this->hl_state_, MODE_GC16, epd_ambient_temperature(), update_rect);
-    if (draw_result != EPD_DRAW_SUCCESS) { ESP_LOGE(TAG, "epd_hl_update_area failed: %d", draw_result); }
+    EpdRect full = epd_full_screen();
+    enum EpdDrawError err = epd_hl_update_area(&this->hl_state_, MODE_GC16, epd_ambient_temperature(), full);
+    if (err != EPD_DRAW_SUCCESS) { ESP_LOGE(TAG, "full update failed: %d", err); }
     epd_poweroff();
-    ESP_LOGD(TAG, "ED047TC1 update cycle finished.");
+}
+
+// ── Partial update (tick minute, zone spécifique) ────────────────────────────
+void ED047TC1Display::partial_update(int x, int y, int w, int h, enum EpdDrawMode mode) {
+    this->do_update_();
+    copy_buffer_to_epd_(x, y, w, h);
+    EpdRect area = { .x = x, .y = y, .width = w, .height = h };
+    ESP_LOGD(TAG, "Partial update — mode=0x%02X zone=(%d,%d,%d,%d)", mode, x, y, w, h);
+    epd_poweron();
+    enum EpdDrawError err = epd_hl_update_area(&this->hl_state_, mode, epd_ambient_temperature(), area);
+    if (err != EPD_DRAW_SUCCESS) { ESP_LOGE(TAG, "partial update failed: %d", err); }
+    epd_poweroff();
 }
 
 void ED047TC1Display::draw_absolute_pixel_internal(int x, int y, Color color) {
     if (x < 0 || x >= get_width_internal() || y < 0 || y >= get_height_internal() || !this->buffer_) return;
-    uint32_t r_val = color.r; uint32_t g_val = color.g; uint32_t b_val = color.b;
-    uint8_t gray_value = static_cast<uint8_t>((r_val + g_val + b_val) / 3);
-    uint8_t inverted_gray_value = 255 - gray_value;
-
-    this->buffer_[(y * get_width_internal()) + x] = inverted_gray_value;
+    uint32_t r = color.r, g = color.g, b = color.b;
+    uint8_t gray     = static_cast<uint8_t>((r + g + b) / 3);
+    uint8_t inverted = 255 - gray;
+    this->buffer_[(y * get_width_internal()) + x] = inverted;
 }
 
 void ED047TC1Display::dump_config() {
     LOG_DISPLAY("", "ED047TC1 E-Paper Display", this);
     ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", get_width_internal(), get_height_internal());
     LOG_PIN("  PWR Pin: ", pwr_pin_); LOG_PIN("  BST_EN Pin: ", bst_en_pin_);
-    LOG_PIN("  XSTL_PIN (STH/DE): ", xstl_pin_);
-    if (pclk_pin_) { LOG_PIN("  PCLK_PIN (LCD Clock): ", pclk_pin_); }
-    else { ESP_LOGCONFIG(TAG, "  PCLK_PIN: Not configured (XSTL_PIN attempted as PCLK - risky)"); }
-    LOG_PIN("  XLE_PIN (LEH): ", xle_pin_); LOG_PIN("  SPV_PIN (STV): ", spv_pin_);
-    LOG_PIN("  CKV_PIN (CKV): ", ckv_pin_);
+    LOG_PIN("  XSTL_PIN: ", xstl_pin_);
+    if (pclk_pin_) { LOG_PIN("  PCLK_PIN: ", pclk_pin_); }
+    LOG_PIN("  XLE_PIN: ", xle_pin_); LOG_PIN("  SPV_PIN: ", spv_pin_);
+    LOG_PIN("  CKV_PIN: ", ckv_pin_);
     for (int i=0; i<8; ++i) {
-        if (d_pins_[i] != nullptr) {
-            ESP_LOGCONFIG(TAG, "  D%d Pin: GPIO%d", i, (int)esphome_pin_to_gpio_num(d_pins_[i]));
-        } else {
-            ESP_LOGCONFIG(TAG, "  D%d Pin: NONE", i);
-        }
+        if (d_pins_[i] != nullptr) { ESP_LOGCONFIG(TAG, "  D%d Pin: GPIO%d", i, (int)esphome_pin_to_gpio_num(d_pins_[i])); }
+        else { ESP_LOGCONFIG(TAG, "  D%d Pin: NONE", i); }
     }
     LOG_UPDATE_INTERVAL(this);
 }
